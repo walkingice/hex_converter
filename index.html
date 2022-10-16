@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>Number converter</title>
+    <style>
+        body {
+            font-size: 1.5rem;
+            border-width: 1px;
+            padding: 5px;
+            margin: 1px;
+            min-height: 90vh;
+        }
+
+        footer {
+            position: fixed;
+            bottom: 0;
+            width: 90%;
+            font-size: 1rem;
+            text-align: center;
+        }
+
+        p.desc {
+            margin-left: 20px;
+            font-size: 1rem;
+        }
+
+        input {
+            font-size: 2rem;
+            padding: 5px;
+            width: 90%;
+            margin: auto;
+            background-color: #FFC;
+        }
+
+        .highlight {
+            background-color: #FFC;
+        }
+
+        div.row {
+            min-height: 50px;
+            background-color: #DDDDFF;
+            margin: 20px;
+            padding: 20px;
+        }
+
+        div.row.cache {
+            background-color: #FFF;
+
+        }
+
+        .user-input {
+            margin-bottom: 20px;
+        }
+
+        table,
+        th,
+        td {
+            border: 1px solid black;
+        }
+
+        td {
+            text-align: right;
+            line-height: 2.2rem;
+            padding-right: 10px;
+        }
+
+        tr {
+            background: #CCC
+        }
+
+        tr:nth-child(odd) {
+            background: #EEE
+        }
+
+        tr:nth-child(even) {
+            background: #FFF
+        }
+
+        table {
+            width: 90%;
+            border-collapse: collapse;
+        }
+
+        span.group {
+            border: 1px solid #AAA;
+            margin-left: 10px;
+        }
+
+        .cache-btn {
+            display: block;
+            margin: auto;
+        }
+
+        @media (max-width:600px) {
+            body {
+                font-size: 1rem;
+            }
+            input {
+                font-size: 1.5rem;
+            }
+            td {
+                line-height: 1.8rem;
+            }
+        }
+
+    </style>
+    <!--
+    <link rel="stylesheet" href="./styles.css">
+    <script src="./converter.js"></script>
+    -->
+</head>
+
+<body>
+    <h1>Convert numbers</h1>
+    <p class="desc">To convert numbers between hexadecimal, octal and binary </p>
+    <div class="row">
+        <p>
+            Input `<strong>0b</strong>11` for binary, `<strong>0x</strong>FF` for hex, `<strong>0o</strong>11` for octal. Use [space] to split input
+            numbers
+        </p>
+        <div class="user-input"><input id="input_guess" class="highlight"></input></div>
+        <table>
+            <thead>
+
+                <tr>
+                    <th>input</th>
+                    <th>Decimal</th>
+                    <th>Hex</th>
+                    <th>Binary</th>
+                    <th>Octal</th>
+                    <th>Cache</th>
+                </tr>
+            </thead>
+            <tbody id="current-table-body">
+
+            </tbody>
+        </table>
+    </div>
+
+    <div class="row cache">
+        <p>
+            Cache
+        </p>
+        <table>
+            <thead>
+                <tr>
+                    <th>input</th>
+                    <th>Decimal</th>
+                    <th>Hex</th>
+                    <th>Binary</th>
+                    <th>Octal</th>
+                    <th>Cache</th>
+                </tr>
+            </thead>
+
+            <tbody id="cache-table-body">
+            </tbody>
+
+        </table>
+    </div>
+    <footer>
+        Source: <a href="https://github.com/walkingice/hex_converter">Github</a>. License: MIT. This is all-in-one page, you can save this page to local storage and open this in browser offline.
+    </footer>
+    <script>
+        const CACHE_KEY = "_num_convert_cache"
+        const regexAllBinary = /^[10]+$/
+        const regexAnyHex = /[abcdef]+/
+
+        const FORMAT_DEC = 0
+        const FORMAT_HEX = 1
+        const FORMAT_BIN = 2
+        const FORMAT_OCT = 3
+
+        class Pack {
+            constructor(input) {
+                this.input = input
+                this.value = 0
+                this.format = FORMAT_DEC
+                this.dec = 0
+                this.hex = 0
+                this.oct = 0
+                this.bin = 0
+            }
+        }
+
+        class Converter {
+
+            constructor(domCurrentTableBody, domCacheTableBody) {
+                this.domCurrentTableBody = domCurrentTableBody
+                this.domCacheTableBody = domCacheTableBody
+            }
+
+            replaceTable(domTableBody, fragment) {
+                domTableBody.innerHTML = ""
+                domTableBody.appendChild(fragment)
+            }
+
+            addToLocalStorage(input) {
+                let arrayInString = localStorage[CACHE_KEY] || ""
+                let array = arrayInString.split(",")
+                if (array.indexOf(input) === -1) {
+                    array.push(input)
+                }
+                localStorage[CACHE_KEY] = array.join(",")
+                this.renderCache()
+            }
+
+            removeFromLocalStorage(input) {
+                let arrayInString = localStorage[CACHE_KEY] || ""
+                let array = arrayInString.split(",")
+                let index = array.indexOf(input)
+                if (index !== -1) {
+                    array.splice(index, 1)
+                }
+                localStorage[CACHE_KEY] = array.join(",")
+                this.renderCache()
+            }
+
+            //
+            // "abcdefg" -> ["abc", "defg"]
+            //
+            groupBy4FromLast(text) {
+                let result = []
+                let cache = []
+                let count = 0;
+                for (let i = text.length - 1; i >= 0; i--) {
+                    cache.unshift(text[i])
+                    count++
+                    if (count == 4) {
+                        count = 0
+                        let copy = cache.concat()
+                        cache = []
+                        result.unshift(copy.join(""))
+                    }
+                }
+                if (cache.length > 0) {
+                    result.unshift(cache.join(""))
+                }
+                return result
+            }
+
+            createTdText(text) {
+                let domTd = document.createElement('td')
+                domTd.innerHTML = text.toLocaleUpperCase()
+                return domTd
+            }
+
+            createTdDec(text) {
+                let domTd = document.createElement('td')
+                domTd.innerText = text
+                return domTd
+            }
+
+            createTdHex(text) {
+                let domTd = document.createElement('td')
+                this.groupBy4FromLast(text.toLocaleUpperCase()).forEach(p => {
+                    let span = document.createElement('span')
+                    span.classList = 'group'
+                    span.innerText = p
+                    domTd.appendChild(span)
+                })
+                return domTd
+            }
+
+            createTdBin(text) {
+                let domTd = document.createElement('td')
+                this.groupBy4FromLast(text.toLocaleUpperCase()).forEach(p => {
+                    let span = document.createElement('span')
+                    span.classList = 'group'
+                    span.innerText = p
+                    domTd.appendChild(span)
+                })
+                return domTd
+            }
+
+            createTdOct(text) {
+                let domTd = document.createElement('td')
+                domTd.innerText = text
+                return domTd
+            }
+
+            createTdButton(text, isCallbackForAdding) {
+                let domTd = document.createElement('td')
+                let domBtn = document.createElement('button')
+                domBtn.classList = "cache-btn"
+                if (isCallbackForAdding) {
+                    let self = this
+                    domBtn.innerText = "Add"
+                    domBtn.onclick = () => {
+                        self.addToLocalStorage(text)
+                    }
+                } else {
+                    let self = this
+                    domBtn.innerText = "Del"
+                    domBtn.onclick = function () {
+                        self.removeFromLocalStorage(text)
+                    }
+                }
+                domTd.appendChild(domBtn)
+                return domTd
+            }
+
+            //
+            // convertedArray = [['1', 1, 1, 1], ['123', 123, 7B, 1111011], ....]
+            //
+            renderIntoFragment(packArray, isCallbackForAdding) {
+                const fragment = document.createDocumentFragment()
+                packArray.forEach(pack => {
+                    let domRow = document.createElement('tr')
+                    domRow.appendChild(this.createTdText(pack.input))
+                    domRow.appendChild(this.createTdDec(pack.dec))
+                    domRow.appendChild(this.createTdHex(pack.hex))
+                    domRow.appendChild(this.createTdBin(pack.bin))
+                    domRow.appendChild(this.createTdOct(pack.oct))
+                    domRow.appendChild(this.createTdButton(pack.input, isCallbackForAdding))
+                    fragment.appendChild(domRow)
+                })
+                return fragment
+            }
+
+            calculate(pack) {
+                let number = Number(pack.value)
+                pack.dec = number.toString()
+                pack.hex = number.toString(16)
+                pack.oct = number.toString(8)
+                pack.bin = number.toString(2)
+                return pack
+            }
+
+            parseInputFromPack(pack) {
+                const { input, format } = pack
+                if (format == FORMAT_BIN) {
+                    if (input.startsWith('b')) {
+                        pack.value = parseInt(input.slice(1), 2) || 0
+                    } else if (input.startsWith('0b')) {
+                        pack.value = parseInt(input.slice(2), 2) || 0
+                    } else {
+                        pack.value = parseInt(input, 2) || 0
+                    }
+                } else if (format == FORMAT_OCT) {
+                    if (input.startsWith('o')) {
+                        pack.value = parseInt(input.slice(1), 8) || 0
+                    } else if (input.startsWith('0o')) {
+                        pack.value = parseInt(input.slice(2), 8) || 0
+                    } else {
+                        pack.value = parseInt(input, 8) || 0
+                    }
+                } else if (format == FORMAT_HEX) {
+                    if (input.startsWith('x')) {
+                        pack.value = parseInt(input.slice(1), 16) || 0
+                    } else if (input.startsWith('0x')) {
+                        pack.value = parseInt(input.slice(2), 16) || 0
+                    } else {
+                        pack.value = parseInt(input, 16) || 0
+                    }
+                } else {
+                    pack.value = parseInt(input) || 0
+                }
+                return pack
+            }
+
+            guessFormat(pack) {
+                let input = pack.input
+                if (input.startsWith('0b') || (input.startsWith('b'))) {
+                    pack.format = FORMAT_BIN
+                    return pack
+                }
+                if (input.startsWith('0o') || (input.startsWith('o'))) {
+                    pack.format = FORMAT_OCT
+                    return pack
+                }
+
+                if (input.startsWith('0x') || (input.startsWith('x'))) {
+                    pack.format = FORMAT_HEX
+                    return pack
+                }
+
+                // sometimes I am lazy, only input `FF00` without leading `0x` or `x`
+                if (regexAnyHex.test(input)) {
+                    pack.format = FORMAT_HEX
+                    return pack
+                }
+
+                pack.format = FORMAT_DEC
+                return pack
+            }
+
+            textToPack(input) {
+                return new Pack(input)
+            }
+
+            normalize(input) {
+                return input.trim().toLocaleLowerCase()
+            }
+
+            convertInputToDifferentFormats(inputArray) {
+                return inputArray
+                    .map(this.normalize)
+                    .map(this.textToPack)
+                    .map(this.guessFormat)
+                    .map(this.parseInputFromPack)
+                    .map(this.calculate)
+            }
+
+            renderInput(domInput) {
+                let input = domInput.value
+                let inputArray = input.split(" ").filter(t => t.length > 0)
+                let convertedArray = this.convertInputToDifferentFormats(inputArray)
+                let fragment = this.renderIntoFragment(convertedArray, true)
+                this.replaceTable(this.domCurrentTableBody, fragment)
+            }
+
+            renderCache() {
+                let arrayInString = localStorage[CACHE_KEY] || ""
+                // used `join(",")` to save inputs to localStorage
+                let inputArray = arrayInString.split(",").filter(t => t.length > 0)
+                let convertedArray = this.convertInputToDifferentFormats(inputArray)
+                let fragment = this.renderIntoFragment(convertedArray, false)
+                this.replaceTable(this.domCacheTableBody, fragment)
+            }
+        }
+
+        window.onload = function () {
+            let domInput = document.getElementById('input_guess')
+            let domCurrentTableBody = document.getElementById('current-table-body')
+            let domCacheTableBody = document.getElementById('cache-table-body')
+
+            let converter = new Converter(domCurrentTableBody, domCacheTableBody)
+
+            converter.renderInput(domInput)
+            converter.renderCache()
+
+            domInput.addEventListener('input', (e) => {
+                converter.renderInput(domInput)
+            })
+        }
+    </script>
+
+</body>
+
+</html>
